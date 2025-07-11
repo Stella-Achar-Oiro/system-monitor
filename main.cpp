@@ -1,5 +1,5 @@
 #include "header.h"
-#include <SDL.h>
+#include <SDL2/SDL.h>
 
 /*
 NOTE : You are free to change the code as you wish, the main objective is to make the
@@ -41,18 +41,465 @@ using namespace gl;
 #include IMGUI_IMPL_OPENGL_LOADER_CUSTOM
 #endif
 
-// Global monitoring instances
-static CPUMonitor g_cpuMonitor;
-static ThermalMonitor g_thermalMonitor;
-static MemoryProcessMonitor g_memoryProcessMonitor;
-static NetworkMonitor g_networkMonitor;
-static bool g_thermalInitialized = false;
-static bool g_enhancedInitialized = false;
+// systemWindow, display information for the system monitorization
+void systemWindow(const char *id, ImVec2 size, ImVec2 position)
+{
+    ImGui::Begin(id);
+    ImGui::SetWindowSize(id, size);
+    ImGui::SetWindowPos(id, position);
 
-// Performance optimization - track active tabs
-static int g_activeMainTab = 0;
-static std::chrono::steady_clock::time_point g_lastUIUpdate = std::chrono::steady_clock::now();
+    // System Info Section
+    ImGui::Text("System Information");
+    ImGui::Separator();
+    
+    // Basic system info
+    ImGui::Text("OS: %s", getOsName());
+    ImGui::Text("User: %s", getCurrentUser().c_str());
+    ImGui::Text("Hostname: %s", getHostname().c_str());
+    ImGui::Text("Total Processes: %d", getTotalProcesses());
+    ImGui::Text("CPU: %s", CPUinfo().c_str());
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    
+    // Tabbed sections
+    if (ImGui::BeginTabBar("SystemTabs"))
+    {
+        // CPU Tab
+        if (ImGui::BeginTabItem("CPU"))
+        {
+            static bool pauseCPU = false;
+            static float cpuGraphFPS = 60.0f;
+            static float cpuYScale = 1.0f;
+            static vector<float> cpuHistory;
+            static CPUStats previousCPU = {0};
+            
+            // Controls
+            ImGui::Checkbox("Pause CPU Graph", &pauseCPU);
+            ImGui::SameLine();
+            ImGui::SliderFloat("FPS", &cpuGraphFPS, 1.0f, 120.0f, "%.1f");
+            ImGui::SliderFloat("Y-Scale", &cpuYScale, 0.1f, 2.0f, "%.1f");
+            
+            // Read current CPU stats
+            CPUStats currentCPU = readCPUStats();
+            float cpuPercent = calculateCPUPercent(currentCPU, previousCPU);
+            previousCPU = currentCPU;
+            
+            // Update history if not paused
+            if (!pauseCPU)
+            {
+                cpuHistory.push_back(cpuPercent);
+                if (cpuHistory.size() > 100)
+                    cpuHistory.erase(cpuHistory.begin());
+            }
+            
+            // Display current CPU usage
+            ImGui::Text("CPU Usage: %.1f%%", cpuPercent);
+            
+            // CPU Graph
+            if (!cpuHistory.empty())
+            {
+                ImGui::PlotLines("CPU Usage", cpuHistory.data(), cpuHistory.size(), 0, 
+                               ("CPU: " + to_string((int)cpuPercent) + "%").c_str(), 
+                               0.0f, 100.0f * cpuYScale, ImVec2(0, 80));
+            }
+            
+            ImGui::EndTabItem();
+        }
+        
+        // Fan Tab
+        if (ImGui::BeginTabItem("Fan"))
+        {
+            static bool pauseFan = false;
+            static float fanGraphFPS = 60.0f;
+            static float fanYScale = 1.0f;
+            static vector<float> fanHistory;
+            
+            // Controls
+            ImGui::Checkbox("Pause Fan Graph", &pauseFan);
+            ImGui::SameLine();
+            ImGui::SliderFloat("FPS##Fan", &fanGraphFPS, 1.0f, 120.0f, "%.1f");
+            ImGui::SliderFloat("Y-Scale##Fan", &fanYScale, 0.1f, 2.0f, "%.1f");
+            
+            // Simulated fan speed (since fan info is hardware-specific)
+            static float fanSpeed = 1200.0f + (rand() % 400);
+            
+            if (!pauseFan)
+            {
+                fanSpeed = 1200.0f + (rand() % 400);
+                fanHistory.push_back(fanSpeed);
+                if (fanHistory.size() > 100)
+                    fanHistory.erase(fanHistory.begin());
+            }
+            
+            ImGui::Text("Fan Speed: %.0f RPM", fanSpeed);
+            
+            // Fan Graph
+            if (!fanHistory.empty())
+            {
+                ImGui::PlotLines("Fan Speed", fanHistory.data(), fanHistory.size(), 0,
+                               ("Fan: " + to_string((int)fanSpeed) + " RPM").c_str(),
+                               800.0f, 2000.0f * fanYScale, ImVec2(0, 80));
+            }
+            
+            ImGui::EndTabItem();
+        }
+        
+        // Thermal Tab
+        if (ImGui::BeginTabItem("Thermal"))
+        {
+            static bool pauseThermal = false;
+            static float thermalGraphFPS = 60.0f;
+            static float thermalYScale = 1.0f;
+            static vector<float> thermalHistory;
+            
+            // Controls
+            ImGui::Checkbox("Pause Thermal Graph", &pauseThermal);
+            ImGui::SameLine();
+            ImGui::SliderFloat("FPS##Thermal", &thermalGraphFPS, 1.0f, 120.0f, "%.1f");
+            ImGui::SliderFloat("Y-Scale##Thermal", &thermalYScale, 0.1f, 2.0f, "%.1f");
+            
+            // Read thermal temperature
+            float temp = readThermalTemp();
+            
+            if (!pauseThermal)
+            {
+                thermalHistory.push_back(temp);
+                if (thermalHistory.size() > 100)
+                    thermalHistory.erase(thermalHistory.begin());
+            }
+            
+            ImGui::Text("Temperature: %.1f°C", temp);
+            
+            // Thermal Graph
+            if (!thermalHistory.empty())
+            {
+                ImGui::PlotLines("Temperature", thermalHistory.data(), thermalHistory.size(), 0,
+                               ("Temp: " + to_string((int)temp) + "°C").c_str(),
+                               0.0f, 100.0f * thermalYScale, ImVec2(0, 80));
+            }
+            
+            ImGui::EndTabItem();
+        }
+        
+        ImGui::EndTabBar();
+    }
 
+    ImGui::End();
+}
+
+// memoryProcessesWindow, display information for the memory and processes information
+void memoryProcessesWindow(const char *id, ImVec2 size, ImVec2 position)
+{
+    ImGui::Begin(id);
+    ImGui::SetWindowSize(id, size);
+    ImGui::SetWindowPos(id, position);
+
+    // Memory Information
+    MemoryInfo memInfo = readMemoryInfo();
+    
+    ImGui::Text("Memory Information");
+    ImGui::Separator();
+    
+    // RAM Section
+    ImGui::Text("RAM Usage");
+    ImGui::Text("Total: %s", formatBytes(memInfo.total).c_str());
+    ImGui::Text("Used: %s (%.1f%%)", formatBytes(memInfo.used).c_str(), memInfo.memUsedPercent);
+    ImGui::Text("Available: %s", formatBytes(memInfo.available).c_str());
+    ImGui::Text("Cached: %s", formatBytes(memInfo.cached).c_str());
+    ImGui::Text("Buffers: %s", formatBytes(memInfo.buffers).c_str());
+    
+    // RAM Progress Bar
+    ImGui::ProgressBar(memInfo.memUsedPercent / 100.0f, ImVec2(0.0f, 0.0f), 
+                      ("RAM: " + to_string((int)memInfo.memUsedPercent) + "%").c_str());
+    
+    ImGui::Spacing();
+    
+    // SWAP Section
+    ImGui::Text("SWAP Usage");
+    ImGui::Text("Total: %s", formatBytes(memInfo.swapTotal).c_str());
+    ImGui::Text("Used: %s (%.1f%%)", formatBytes(memInfo.swapUsed).c_str(), memInfo.swapUsedPercent);
+    ImGui::Text("Free: %s", formatBytes(memInfo.swapFree).c_str());
+    
+    // SWAP Progress Bar
+    ImGui::ProgressBar(memInfo.swapUsedPercent / 100.0f, ImVec2(0.0f, 0.0f),
+                      ("SWAP: " + to_string((int)memInfo.swapUsedPercent) + "%").c_str());
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    
+    // Disk Information
+    ImGui::Text("Disk Usage");
+    vector<DiskInfo> disks = readDiskInfo();
+    
+    for (const auto& disk : disks)
+    {
+        ImGui::Text("%s (%s)", disk.filesystem.c_str(), disk.mountpoint.c_str());
+        ImGui::Text("Total: %s, Used: %s, Free: %s", 
+                   formatBytes(disk.total).c_str(),
+                   formatBytes(disk.used).c_str(),
+                   formatBytes(disk.free).c_str());
+        ImGui::ProgressBar(disk.usedPercent / 100.0f, ImVec2(0.0f, 0.0f),
+                          ("Disk: " + to_string((int)disk.usedPercent) + "%").c_str());
+        ImGui::Spacing();
+    }
+    
+    ImGui::Separator();
+    
+    // Process Table
+    ImGui::Text("Process Table");
+    static char processFilter[256] = "";
+    ImGui::InputText("Filter processes", processFilter, sizeof(processFilter));
+    
+    static vector<Proc> processes;
+    static float lastUpdate = 0.0f;
+    float currentTime = ImGui::GetTime();
+    
+    // Update process list every 2 seconds
+    if (currentTime - lastUpdate > 2.0f)
+    {
+        processes = readProcessList();
+        lastUpdate = currentTime;
+    }
+    
+    // Process table headers
+    if (ImGui::BeginTable("ProcessTable", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY))
+    {
+        ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("Virtual Size", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("RSS", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("CPU Time", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableHeadersRow();
+        
+        string filterStr = string(processFilter);
+        transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
+        
+        for (const auto& proc : processes)
+        {
+            // Filter processes
+            if (!filterStr.empty())
+            {
+                string procName = proc.name;
+                transform(procName.begin(), procName.end(), procName.begin(), ::tolower);
+                if (procName.find(filterStr) == string::npos)
+                    continue;
+            }
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", proc.pid);
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", proc.name.c_str());
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%c", proc.state);
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", formatBytes(proc.vsize).c_str());
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", formatBytes(proc.rss * 4096).c_str()); // RSS is in pages
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%lld", proc.utime + proc.stime);
+        }
+        
+        ImGui::EndTable();
+    }
+
+    ImGui::End();
+}
+
+// network, display information network information
+void networkWindow(const char *id, ImVec2 size, ImVec2 position)
+{
+    ImGui::Begin(id);
+    ImGui::SetWindowSize(id, size);
+    ImGui::SetWindowPos(id, position);
+
+    ImGui::Text("Network Information");
+    ImGui::Separator();
+    
+    // IPv4 Interfaces
+    ImGui::Text("IPv4 Interfaces");
+    Networks networks = getNetworkInterfaces();
+    
+    if (ImGui::BeginTable("IPv4Table", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+    {
+        ImGui::TableSetupColumn("Interface", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+        ImGui::TableSetupColumn("IPv4 Address", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+        ImGui::TableHeadersRow();
+        
+        for (const auto& ip4 : networks.ip4s)
+        {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", ip4.name);
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", ip4.addressBuffer);
+        }
+        
+        ImGui::EndTable();
+    }
+    
+    ImGui::Spacing();
+    ImGui::Separator();
+    
+    // Network Statistics
+    ImGui::Text("Network Statistics");
+    static vector<NetworkStats> networkStats;
+    static float lastNetworkUpdate = 0.0f;
+    float currentTime = ImGui::GetTime();
+    
+    // Update network stats every 2 seconds
+    if (currentTime - lastNetworkUpdate > 2.0f)
+    {
+        networkStats = readNetworkStats();
+        lastNetworkUpdate = currentTime;
+    }
+    
+    // Interface selector
+    static size_t selectedInterface = 0;
+    vector<string> interfaceNames = getNetworkInterfaceList();
+    
+    if (!interfaceNames.empty())
+    {
+        ImGui::Text("Select Interface:");
+        ImGui::SameLine();
+        if (ImGui::BeginCombo("##interface", interfaceNames[selectedInterface].c_str()))
+        {
+            for (size_t i = 0; i < interfaceNames.size(); i++)
+            {
+                bool isSelected = (selectedInterface == i);
+                if (ImGui::Selectable(interfaceNames[i].c_str(), isSelected))
+                    selectedInterface = i;
+                if (isSelected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+        
+        ImGui::Spacing();
+        
+        // RX Statistics Table
+        ImGui::Text("RX (Receive) Statistics for %s", interfaceNames[selectedInterface].c_str());
+        RX rxStats = getRXStats(interfaceNames[selectedInterface]);
+        
+        if (ImGui::BeginTable("RXTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+            ImGui::TableHeadersRow();
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Bytes");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", formatNetworkBytes(rxStats.bytes).c_str());
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Packets");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.packets);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Errors");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.errs);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Dropped");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.drop);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("FIFO");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.fifo);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Compressed");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.compressed);
+            
+            ImGui::EndTable();
+        }
+        
+        ImGui::Spacing();
+        
+        // TX Statistics Table
+        ImGui::Text("TX (Transmit) Statistics for %s", interfaceNames[selectedInterface].c_str());
+        TX txStats = getTXStats(interfaceNames[selectedInterface]);
+        
+        if (ImGui::BeginTable("TXTable", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
+        {
+            ImGui::TableSetupColumn("Metric", ImGuiTableColumnFlags_WidthFixed, 150.0f);
+            ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 200.0f);
+            ImGui::TableHeadersRow();
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Bytes");
+            ImGui::TableNextColumn();
+            ImGui::Text("%s", formatNetworkBytes(txStats.bytes).c_str());
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Packets");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.packets);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Errors");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.errs);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Dropped");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.drop);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("FIFO");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.fifo);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Frame");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.frame);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Compressed");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.compressed);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Multicast");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.multicast);
+            
+            ImGui::EndTable();
+        }
+    }
+
+    ImGui::End();
+}
 
 // Main code
 int main(int, char **)
@@ -78,20 +525,8 @@ int main(int, char **)
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
     SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
-    SDL_Window *window = SDL_CreateWindow("System Monitor", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
-    if (!window) {
-        fprintf(stderr, "Failed to create SDL window: %s\n", SDL_GetError());
-        SDL_Quit();
-        return -1;
-    }
-    
+    SDL_Window *window = SDL_CreateWindow("Dear ImGui SDL2+OpenGL3 example", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, window_flags);
     SDL_GLContext gl_context = SDL_GL_CreateContext(window);
-    if (!gl_context) {
-        fprintf(stderr, "Failed to create OpenGL context: %s\n", SDL_GetError());
-        SDL_DestroyWindow(window);
-        SDL_Quit();
-        return -1;
-    }
     SDL_GL_MakeCurrent(window, gl_context);
     SDL_GL_SetSwapInterval(1); // Enable vsync
 
@@ -125,8 +560,8 @@ int main(int, char **)
     // render bindings
     ImGuiIO &io = ImGui::GetIO();
 
-    // Setup enhanced UI theme
-    setupUITheme();
+    // Setup Dear ImGui style
+    ImGui::StyleColorsDark();
 
     // Setup Platform/Renderer backends
     ImGui_ImplSDL2_InitForOpenGL(window, gl_context);
@@ -161,221 +596,18 @@ int main(int, char **)
         ImGui::NewFrame();
 
         {
-            // Create a single fullscreen window with tabbed interface
             ImVec2 mainDisplay = io.DisplaySize;
-            g_layout.updateLayout(mainDisplay);
-            
-            ImGui::SetNextWindowPos(ImVec2(0, 0));
-            ImGui::SetNextWindowSize(mainDisplay);
-            
-            ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoResize | 
-                                          ImGuiWindowFlags_NoMove | 
-                                          ImGuiWindowFlags_NoCollapse |
-                                          ImGuiWindowFlags_MenuBar;
-            
-            if (ImGui::Begin("System Monitor", nullptr, windowFlags)) {
-                // Menu bar
-                if (ImGui::BeginMenuBar()) {
-                    if (ImGui::BeginMenu("View")) {
-                        ImGui::MenuItem("Always on Top", nullptr, false, false);
-                        ImGui::Separator();
-                        ImGui::MenuItem("Dark Theme", nullptr, true);
-                        ImGui::EndMenu();
-                    }
-                    if (ImGui::BeginMenu("Help")) {
-                        ImGui::MenuItem("About", nullptr, false, false);
-                        ImGui::EndMenu();
-                    }
-                    ImGui::EndMenuBar();
-                }
-                
-                // Initialize thermal monitor on first run
-                if (!g_thermalInitialized) {
-                    initThermalMonitor(g_thermalMonitor);
-                    g_thermalInitialized = true;
-                }
-                
-                // Initialize enhanced monitoring on first run
-                if (!g_enhancedInitialized) {
-                    initializeHistoricalData(getHistoricalData());
-                    g_enhancedInitialized = true;
-                }
-                
-                // Update monitors at reduced rate to maintain performance
-                auto now = std::chrono::steady_clock::now();
-                auto elapsed = std::chrono::duration<float>(now - g_lastUIUpdate).count();
-                
-                // Update basic monitors every 100ms for responsiveness
-                if (elapsed >= 0.1f) {
-                    updateCPUMonitor(g_cpuMonitor);
-                    updateThermalMonitor(g_thermalMonitor);
-                    
-                    // Update enhanced monitoring data
-                    updateMemoryProcessMonitor(g_memoryProcessMonitor);
-                    updateNetworkMonitor(g_networkMonitor);
-                    updateHistoricalData(getHistoricalData(), g_cpuMonitor, 
-                                       g_memoryProcessMonitor, g_thermalMonitor, g_networkMonitor);
-                    
-                    g_lastUIUpdate = now;
-                }
-                
-                // Main tabbed interface
-                if (ImGui::BeginTabBar("MainTabs", ImGuiTabBarFlags_None)) {
-                    // System Overview Tab
-                    if (ImGui::BeginTabItem("System Overview")) {
-                        g_activeMainTab = 0;
-                        
-                        // Update memory info for overview
-                        updateMemoryProcessMonitor(g_memoryProcessMonitor);
-                        
-                        // System info in columns
-                        ImGui::Columns(2, "SystemColumns", true);
-                        
-                        // Left column - System Information
-                        ImGui::Text("System Information");
-                        ImGui::Separator();
-                        ImGui::Text("OS: %s", getOsName());
-                        ImGui::Text("Current User: %s", getCurrentUser().c_str());
-                        ImGui::Text("Hostname: %s", getHostname().c_str());
-                        ImGui::Text("Total Processes: %d", getTotalProcesses());
-                        ImGui::Text("CPU Model: %s", getCPUModel().c_str());
-                        
-                        ImGui::NextColumn();
-                        
-                        // Right column - Quick stats
-                        ImGui::Text("Quick Statistics");
-                        ImGui::Separator();
-                        ImGui::Text("CPU Usage: %.1f%%", g_cpuMonitor.currentCPUPercent);
-                        ImGui::Text("Max Temperature: %.1f°C", g_thermalMonitor.currentMaxTemp);
-                        ImGui::Text("Memory Usage: %.1f%%", g_memoryProcessMonitor.memory.memUsedPercent);
-                        ImGui::Text("Available Memory: %s", formatBytes(g_memoryProcessMonitor.memory.memAvailable * 1024).c_str());
-                        
-                        // Network summary
-                        updateNetworkMonitor(g_networkMonitor);
-                        float totalRxSpeed = 0.0f, totalTxSpeed = 0.0f;
-                        for (const auto& iface : g_networkMonitor.interfaces) {
-                            if (iface.name != "lo") {
-                                totalRxSpeed += iface.rxSpeed;
-                                totalTxSpeed += iface.txSpeed;
-                            }
-                        }
-                        ImGui::Text("Network: ↓ %s | ↑ %s", 
-                                   formatNetworkSpeed(totalRxSpeed).c_str(),
-                                   formatNetworkSpeed(totalTxSpeed).c_str());
-                        
-                        ImGui::Columns(1);
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // CPU & Thermal Tab
-                    if (ImGui::BeginTabItem("CPU & Thermal")) {
-                        g_activeMainTab = 1;
-                        
-                        // Create sub-tabs for CPU and Thermal
-                        if (ImGui::BeginTabBar("CPUThermalTabs")) {
-                            // CPU tab
-                            if (ImGui::BeginTabItem("CPU")) {
-                                // Controls
-                                ImGui::Text("CPU Usage: %.1f%%", g_cpuMonitor.currentCPUPercent);
-                                ImGui::SameLine();
-                                
-                                // Play/Pause button
-                                if (ImGui::Button(g_cpuMonitor.isPaused ? "Resume" : "Pause")) {
-                                    g_cpuMonitor.isPaused = !g_cpuMonitor.isPaused;
-                                }
-                                
-                                // FPS slider
-                                ImGui::SliderFloat("Update Rate (FPS)", &g_cpuMonitor.updateRate, 1.0f, 120.0f, "%.1f");
-                                
-                                // Y-scale slider
-                                ImGui::SliderFloat("Y-Scale", &g_cpuMonitor.yScale, 50.0f, 200.0f, "%.1f%%");
-                                
-                                // Graph
-                                if (!g_cpuMonitor.cpuHistory.empty()) {
-                                    // Convert deque to vector for ImGui
-                                    vector<float> plotData(g_cpuMonitor.cpuHistory.begin(), g_cpuMonitor.cpuHistory.end());
-                                    
-                                    ImGui::PlotLines("CPU Usage", plotData.data(), plotData.size(), 
-                                                   0, nullptr, 0.0f, g_cpuMonitor.yScale, ImVec2(0, 200));
-                                    
-                                    // Current percentage overlay
-                                    ImGui::Text("Current: %.1f%% | Avg: %.1f%% | Max: %.1f%%", 
-                                               g_cpuMonitor.currentCPUPercent,
-                                               // Calculate average
-                                               std::accumulate(plotData.begin(), plotData.end(), 0.0f) / plotData.size(),
-                                               // Find maximum
-                                               *std::max_element(plotData.begin(), plotData.end()));
-                                }
-                                
-                                ImGui::EndTabItem();
-                            }
-                            
-                            // Thermal tab
-                            if (ImGui::BeginTabItem("Thermal")) {
-                                renderThermalGraph(g_thermalMonitor);
-                                ImGui::EndTabItem();
-                            }
-                            
-                            ImGui::EndTabBar();
-                        }
-                        
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // Memory & Processes Tab
-                    if (ImGui::BeginTabItem("Memory & Processes")) {
-                        g_activeMainTab = 2;
-                        
-                        // Only update when this tab is active for performance
-                        renderMemoryProcessInterface(g_memoryProcessMonitor);
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // Network Tab
-                    if (ImGui::BeginTabItem("Network")) {
-                        g_activeMainTab = 3;
-                        
-                        // Update network monitor
-                        updateNetworkMonitor(g_networkMonitor);
-                        
-                        // Render network interface
-                        renderNetworkInterface(g_networkMonitor);
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // Enhanced Historical Data Tab
-                    if (ImGui::BeginTabItem("Historical Data")) {
-                        g_activeMainTab = 4;
-                        
-                        renderHistoricalGraphs(getHistoricalData());
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // Enhanced Alerts Tab
-                    if (ImGui::BeginTabItem("Alerts & Trends")) {
-                        g_activeMainTab = 5;
-                        
-                        renderAdvancedSystemOverview(getHistoricalData(), g_cpuMonitor, 
-                                                    g_memoryProcessMonitor, g_thermalMonitor);
-                        renderAlertsInterface(getHistoricalData());
-                        renderTrendAnalysisInterface(getHistoricalData());
-                        ImGui::EndTabItem();
-                    }
-                    
-                    // Enhanced Configuration & Export Tab
-                    if (ImGui::BeginTabItem("Configuration")) {
-                        g_activeMainTab = 6;
-                        
-                        renderConfigurationInterface(getHistoricalData().config);
-                        renderExportInterface(getHistoricalData());
-                        ImGui::EndTabItem();
-                    }
-                    
-                    ImGui::EndTabBar();
-                }
-                
-            }
-            ImGui::End();
+            memoryProcessesWindow("== Memory and Processes ==",
+                                  ImVec2((mainDisplay.x / 2) - 20, (mainDisplay.y / 2) + 30),
+                                  ImVec2((mainDisplay.x / 2) + 10, 10));
+            // --------------------------------------
+            systemWindow("== System ==",
+                         ImVec2((mainDisplay.x / 2) - 10, (mainDisplay.y / 2) + 30),
+                         ImVec2(10, 10));
+            // --------------------------------------
+            networkWindow("== Network ==",
+                          ImVec2(mainDisplay.x - 20, (mainDisplay.y / 2) - 60),
+                          ImVec2(10, (mainDisplay.y / 2) + 50));
         }
 
         // Rendering

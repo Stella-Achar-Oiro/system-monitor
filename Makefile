@@ -15,37 +15,18 @@
 #CXX = clang++
 
 EXE = monitor
-OPTIMIZED_EXE = optimized_monitor
 IMGUI_DIR = imgui/lib/
 SOURCES = main.cpp
 SOURCES += system.cpp
 SOURCES += mem.cpp
 SOURCES += network.cpp
-SOURCES += enhanced.cpp
-SOURCES += config_export.cpp
-SOURCES += enhanced_ui_polished.cpp
-SOURCES += ui_polish.cpp
-
-# Optimized version sources
-OPTIMIZED_SOURCES = optimized_main.cpp
-OPTIMIZED_SOURCES += optimized_implementation.cpp
-OPTIMIZED_SOURCES += optimized_rendering.cpp
-OPTIMIZED_SOURCES += optimized_readers.cpp
-OPTIMIZED_SOURCES += system.cpp
-OPTIMIZED_SOURCES += mem.cpp
 SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
 SOURCES += $(IMGUI_DIR)/backend/imgui_impl_sdl.cpp $(IMGUI_DIR)/backend/imgui_impl_opengl3.cpp
 OBJS = $(addsuffix .o, $(basename $(notdir $(SOURCES))))
-
-# Optimized version objects
-OPTIMIZED_SOURCES += $(IMGUI_DIR)/imgui.cpp $(IMGUI_DIR)/imgui_demo.cpp $(IMGUI_DIR)/imgui_draw.cpp $(IMGUI_DIR)/imgui_tables.cpp $(IMGUI_DIR)/imgui_widgets.cpp
-OPTIMIZED_SOURCES += $(IMGUI_DIR)/backend/imgui_impl_sdl.cpp $(IMGUI_DIR)/backend/imgui_impl_opengl3.cpp
-OPTIMIZED_SOURCES += imgui/lib/gl3w/GL/gl3w.c
-OPTIMIZED_OBJS = $(addsuffix .o, $(basename $(notdir $(OPTIMIZED_SOURCES))))
 UNAME_S := $(shell uname -s)
 
 CXXFLAGS = -I$(IMGUI_DIR) -I$(IMGUI_DIR)/backend
-CXXFLAGS += -g -Wall -Wformat -O2 -std=c++17
+CXXFLAGS += -g -Wall -Wformat
 LIBS =
 
 ##---------------------------------------------------------------------
@@ -130,35 +111,8 @@ endif
 all: $(EXE)
 	@echo Build complete for $(ECHO_MESSAGE)
 
-optimized: $(OPTIMIZED_EXE)
-	@echo Optimized build complete for $(ECHO_MESSAGE)
-
 $(EXE): $(OBJS)
 	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS)
 
-$(OPTIMIZED_EXE): $(OPTIMIZED_OBJS)
-	$(CXX) -o $@ $^ $(CXXFLAGS) $(LIBS) -lpthread
-
-# Test extractor for validation
-test_extractor: test_extractor.o system.o mem.o network.o
-	$(CXX) -o $@ $^ $(CXXFLAGS) -lpthread
-
-test_extractor.o: test_extractor.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-
-# Performance benchmark  
-simple_benchmark: simple_benchmark.o optimized_readers.o
-	$(CXX) -o $@ $^ $(CXXFLAGS) -lpthread
-
-simple_benchmark.o: simple_benchmark.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-
-# Debug discrepancies tool (simple version)
-simple_debug: simple_debug.o optimized_implementation.o optimized_readers.o
-	$(CXX) -o $@ $^ $(CXXFLAGS) -lpthread
-
-simple_debug.o: simple_debug.cpp
-	$(CXX) $(CXXFLAGS) -c -o $@ $<
-
 clean:
-	rm -f $(EXE) $(OBJS) $(OPTIMIZED_EXE) $(OPTIMIZED_OBJS) test_extractor test_extractor.o
+	rm -f $(EXE) $(OBJS)
