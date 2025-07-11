@@ -1,0 +1,39 @@
+# Build artifacts
+*.o
+simple_benchmark
+simple_debug
+simple_extractor
+test_extractor
+benchmark_performance
+
+# ImGui config
+imgui.ini
+
+# Editor/IDE files
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+.vscode/
+.idea/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Build directories (if used)
+build/
+bin/
+
+# CMake/Makefile generated files (if used)
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile.user
+
+# Test outputs/logs
+test_output/
+
+# Shell script outputs (if any are generated)
+*.out
