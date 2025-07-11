@@ -89,6 +89,58 @@ int getTotalProcesses()
     return count;
 }
 
+// get process state counts
+ProcessStateCounts getProcessStateCounts()
+{
+    ProcessStateCounts counts = {0, 0, 0, 0, 0, 0, 0};
+    DIR *procDir = opendir("/proc");
+    if (procDir == NULL)
+        return counts;
+
+    struct dirent *entry;
+    while ((entry = readdir(procDir)) != NULL)
+    {
+        if (isdigit(entry->d_name[0]))
+        {
+            string statPath = "/proc/" + string(entry->d_name) + "/stat";
+            ifstream file(statPath);
+            if (file.is_open())
+            {
+                string line;
+                if (getline(file, line))
+                {
+                    istringstream iss(line);
+                    string field;
+                    int fieldIndex = 0;
+                    
+                    while (iss >> field && fieldIndex <= 2)
+                    {
+                        if (fieldIndex == 2) // State field
+                        {
+                            char state = field[0];
+                            switch (state)
+                            {
+                                case 'R': counts.running++; break;
+                                case 'S': counts.sleeping++; break;
+                                case 'D': counts.uninterruptible++; break;
+                                case 'Z': counts.zombie++; break;
+                                case 'T': counts.traced++; break;
+                                case 't': counts.stopped++; break;
+                            }
+                            counts.total++;
+                            break;
+                        }
+                        fieldIndex++;
+                    }
+                }
+                file.close();
+            }
+        }
+    }
+    closedir(procDir);
+    return counts;
+}
+
 // read CPU statistics from /proc/stat
 CPUStats readCPUStats()
 {
@@ -147,14 +199,7 @@ float readThermalTemp()
     return -1.0f; // Error reading temperature
 }
 
-// read fan information (simplified)
-struct FanInfo
-{
-    bool enabled;
-    int speed;
-    int level;
-};
-
+// read fan information from hwmon
 FanInfo readFanInfo()
 {
     FanInfo fan = {false, 0, 0};
@@ -169,7 +214,17 @@ FanInfo readFanInfo()
             fan.enabled = true;
             file >> fan.speed;
             file.close();
-            fan.level = fan.speed / 1000; // Simplified level calculation
+            
+            // Calculate level based on typical fan speed ranges
+            if (fan.speed < 1000)
+                fan.level = 1;
+            else if (fan.speed < 2000)
+                fan.level = 2;
+            else if (fan.speed < 3000)
+                fan.level = 3;
+            else
+                fan.level = 4;
+            
             break;
         }
     }

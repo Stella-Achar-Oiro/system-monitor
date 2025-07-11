@@ -131,7 +131,9 @@ RX getRXStats(const string& interface)
             rx.errs = stat.rxErrs;
             rx.drop = stat.rxDrop;
             rx.fifo = stat.rxFifo;
+            rx.frame = stat.rxFrame;
             rx.compressed = stat.rxCompressed;
+            rx.multicast = stat.rxMulticast;
             break;
         }
     }
@@ -154,9 +156,9 @@ TX getTXStats(const string& interface)
             tx.errs = stat.txErrs;
             tx.drop = stat.txDrop;
             tx.fifo = stat.txFifo;
-            tx.frame = stat.txColls;
+            tx.colls = stat.txColls;
+            tx.carrier = stat.txCarrier;
             tx.compressed = stat.txCompressed;
-            tx.multicast = stat.txCarrier;
             break;
         }
     }

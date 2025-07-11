@@ -46,6 +46,15 @@ vector<Proc> readProcessList()
     if (procDir == NULL)
         return processes;
 
+    // Get total system memory for percentage calculations
+    MemoryInfo memInfo = readMemoryInfo();
+    long long totalMemory = memInfo.total;
+    
+    // Get CPU stats for percentage calculations
+    static CPUStats prevCPUStats = readCPUStats();
+    CPUStats currentCPUStats = readCPUStats();
+    static map<int, Proc> prevProcesses;
+    
     struct dirent *entry;
     while ((entry = readdir(procDir)) != NULL)
     {
@@ -58,6 +67,8 @@ vector<Proc> readProcessList()
             {
                 Proc proc;
                 proc.pid = pid;
+                proc.cpuPercent = 0.0f;
+                proc.memPercent = 0.0f;
                 
                 string line;
                 if (getline(file, line))
@@ -93,11 +104,36 @@ vector<Proc> readProcessList()
                     }
                 }
                 file.close();
+                
+                // Calculate memory percentage
+                if (totalMemory > 0)
+                {
+                    long long procMemory = proc.rss * 4096; // RSS is in pages (4KB each)
+                    proc.memPercent = (float)procMemory / totalMemory * 100.0f;
+                }
+                
+                // Calculate CPU percentage (simplified)
+                if (prevProcesses.find(pid) != prevProcesses.end())
+                {
+                    Proc prevProc = prevProcesses[pid];
+                    long long totalTime = (proc.utime + proc.stime) - (prevProc.utime + prevProc.stime);
+                    long long totalCPUTime = (currentCPUStats.user + currentCPUStats.nice + currentCPUStats.system + currentCPUStats.idle) -
+                                           (prevCPUStats.user + prevCPUStats.nice + prevCPUStats.system + prevCPUStats.idle);
+                    
+                    if (totalCPUTime > 0)
+                    {
+                        proc.cpuPercent = (float)totalTime / totalCPUTime * 100.0f;
+                    }
+                }
+                
                 processes.push_back(proc);
+                prevProcesses[pid] = proc;
             }
         }
     }
     closedir(procDir);
+    
+    prevCPUStats = currentCPUStats;
     return processes;
 }
 

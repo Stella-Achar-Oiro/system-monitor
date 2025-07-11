@@ -56,7 +56,13 @@ void systemWindow(const char *id, ImVec2 size, ImVec2 position)
     ImGui::Text("OS: %s", getOsName());
     ImGui::Text("User: %s", getCurrentUser().c_str());
     ImGui::Text("Hostname: %s", getHostname().c_str());
-    ImGui::Text("Total Processes: %d", getTotalProcesses());
+    
+    // Process state counts
+    ProcessStateCounts procCounts = getProcessStateCounts();
+    ImGui::Text("Total Processes: %d", procCounts.total);
+    ImGui::Text("Running: %d, Sleeping: %d, Zombie: %d", procCounts.running, procCounts.sleeping, procCounts.zombie);
+    ImGui::Text("Uninterruptible: %d, Traced/Stopped: %d", procCounts.uninterruptible, procCounts.traced + procCounts.stopped);
+    
     ImGui::Text("CPU: %s", CPUinfo().c_str());
     
     ImGui::Spacing();
@@ -121,25 +127,34 @@ void systemWindow(const char *id, ImVec2 size, ImVec2 position)
             ImGui::SliderFloat("FPS##Fan", &fanGraphFPS, 1.0f, 120.0f, "%.1f");
             ImGui::SliderFloat("Y-Scale##Fan", &fanYScale, 0.1f, 2.0f, "%.1f");
             
-            // Simulated fan speed (since fan info is hardware-specific)
-            static float fanSpeed = 1200.0f + (rand() % 400);
+            // Read real fan information
+            FanInfo fanInfo = readFanInfo();
             
-            if (!pauseFan)
+            if (!pauseFan && fanInfo.enabled)
             {
-                fanSpeed = 1200.0f + (rand() % 400);
-                fanHistory.push_back(fanSpeed);
+                fanHistory.push_back((float)fanInfo.speed);
                 if (fanHistory.size() > 100)
                     fanHistory.erase(fanHistory.begin());
             }
             
-            ImGui::Text("Fan Speed: %.0f RPM", fanSpeed);
+            // Fan status and information
+            ImGui::Text("Fan Status: %s", fanInfo.enabled ? "Active" : "Disabled/Not Found");
+            if (fanInfo.enabled)
+            {
+                ImGui::Text("Current Speed: %d RPM", fanInfo.speed);
+                ImGui::Text("Level: %d", fanInfo.level);
+            }
             
             // Fan Graph
-            if (!fanHistory.empty())
+            if (!fanHistory.empty() && fanInfo.enabled)
             {
                 ImGui::PlotLines("Fan Speed", fanHistory.data(), fanHistory.size(), 0,
-                               ("Fan: " + to_string((int)fanSpeed) + " RPM").c_str(),
-                               800.0f, 2000.0f * fanYScale, ImVec2(0, 80));
+                               ("Fan: " + to_string(fanInfo.speed) + " RPM").c_str(),
+                               0.0f, 5000.0f * fanYScale, ImVec2(0, 80));
+            }
+            else if (!fanInfo.enabled)
+            {
+                ImGui::Text("Fan monitoring not available on this system");
             }
             
             ImGui::EndTabItem();
@@ -263,15 +278,57 @@ void memoryProcessesWindow(const char *id, ImVec2 size, ImVec2 position)
     }
     
     // Process table headers
-    if (ImGui::BeginTable("ProcessTable", 6, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY))
+    if (ImGui::BeginTable("ProcessTable", 8, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Sortable))
     {
         ImGui::TableSetupColumn("PID", ImGuiTableColumnFlags_WidthFixed, 80.0f);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 150.0f);
         ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed, 60.0f);
+        ImGui::TableSetupColumn("CPU %", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+        ImGui::TableSetupColumn("Memory %", ImGuiTableColumnFlags_WidthFixed, 80.0f);
         ImGui::TableSetupColumn("Virtual Size", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("RSS", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableSetupColumn("CPU Time", ImGuiTableColumnFlags_WidthFixed, 100.0f);
         ImGui::TableHeadersRow();
+        
+        // Handle sorting
+        ImGuiTableSortSpecs* sorts_specs = ImGui::TableGetSortSpecs();
+        if (sorts_specs && sorts_specs->SpecsDirty)
+        {
+            if (sorts_specs->SpecsCount > 0)
+            {
+                const ImGuiTableColumnSortSpecs* sort_spec = &sorts_specs->Specs[0];
+                
+                auto compareFunc = [sort_spec](const Proc& a, const Proc& b) -> bool
+                {
+                    bool ascending = sort_spec->SortDirection == ImGuiSortDirection_Ascending;
+                    
+                    switch (sort_spec->ColumnIndex)
+                    {
+                        case 0: // PID
+                            return ascending ? (a.pid < b.pid) : (a.pid > b.pid);
+                        case 1: // Name
+                            return ascending ? (a.name < b.name) : (a.name > b.name);
+                        case 2: // State
+                            return ascending ? (a.state < b.state) : (a.state > b.state);
+                        case 3: // CPU %
+                            return ascending ? (a.cpuPercent < b.cpuPercent) : (a.cpuPercent > b.cpuPercent);
+                        case 4: // Memory %
+                            return ascending ? (a.memPercent < b.memPercent) : (a.memPercent > b.memPercent);
+                        case 5: // Virtual Size
+                            return ascending ? (a.vsize < b.vsize) : (a.vsize > b.vsize);
+                        case 6: // RSS
+                            return ascending ? (a.rss < b.rss) : (a.rss > b.rss);
+                        case 7: // CPU Time
+                            return ascending ? ((a.utime + a.stime) < (b.utime + b.stime)) : ((a.utime + a.stime) > (b.utime + b.stime));
+                        default:
+                            return false;
+                    }
+                };
+                
+                sort(processes.begin(), processes.end(), compareFunc);
+            }
+            sorts_specs->SpecsDirty = false;
+        }
         
         string filterStr = string(processFilter);
         transform(filterStr.begin(), filterStr.end(), filterStr.begin(), ::tolower);
@@ -296,6 +353,12 @@ void memoryProcessesWindow(const char *id, ImVec2 size, ImVec2 position)
             
             ImGui::TableNextColumn();
             ImGui::Text("%c", proc.state);
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f", proc.cpuPercent);
+            
+            ImGui::TableNextColumn();
+            ImGui::Text("%.2f", proc.memPercent);
             
             ImGui::TableNextColumn();
             ImGui::Text("%s", formatBytes(proc.vsize).c_str());
@@ -427,9 +490,21 @@ void networkWindow(const char *id, ImVec2 size, ImVec2 position)
             
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
+            ImGui::Text("Frame");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.frame);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
             ImGui::Text("Compressed");
             ImGui::TableNextColumn();
             ImGui::Text("%d", rxStats.compressed);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Multicast");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", rxStats.multicast);
             
             ImGui::EndTable();
         }
@@ -478,9 +553,15 @@ void networkWindow(const char *id, ImVec2 size, ImVec2 position)
             
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
-            ImGui::Text("Frame");
+            ImGui::Text("Colls");
             ImGui::TableNextColumn();
-            ImGui::Text("%d", txStats.frame);
+            ImGui::Text("%d", txStats.colls);
+            
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("Carrier");
+            ImGui::TableNextColumn();
+            ImGui::Text("%d", txStats.carrier);
             
             ImGui::TableNextRow();
             ImGui::TableNextColumn();
@@ -488,13 +569,70 @@ void networkWindow(const char *id, ImVec2 size, ImVec2 position)
             ImGui::TableNextColumn();
             ImGui::Text("%d", txStats.compressed);
             
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::Text("Multicast");
-            ImGui::TableNextColumn();
-            ImGui::Text("%d", txStats.multicast);
-            
             ImGui::EndTable();
+        }
+        
+        ImGui::Spacing();
+        ImGui::Separator();
+        
+        // Network Usage Visual Display
+        ImGui::Text("Network Usage Visual Display");
+        
+        if (ImGui::BeginTabBar("NetworkUsageTabs"))
+        {
+            // RX Usage Tab
+            if (ImGui::BeginTabItem("RX Usage"))
+            {
+                ImGui::Text("Receive (RX) Usage by Interface");
+                ImGui::Spacing();
+                
+                for (const auto& interfaceName : interfaceNames)
+                {
+                    RX rxStats = getRXStats(interfaceName);
+                    
+                    // Convert bytes to GB for display (2GB scale)
+                    double rxGB = (double)rxStats.bytes / (1024.0 * 1024.0 * 1024.0);
+                    float rxPercent = (float)(rxGB / 2.0); // Scale to 2GB max
+                    if (rxPercent > 1.0f) rxPercent = 1.0f;
+                    
+                    ImGui::Text("%s", interfaceName.c_str());
+                    ImGui::SameLine();
+                    ImGui::Text("(%.3f GB)", rxGB);
+                    ImGui::ProgressBar(rxPercent, ImVec2(0.0f, 0.0f), 
+                                      (formatNetworkBytes(rxStats.bytes) + " / 2GB").c_str());
+                    ImGui::Spacing();
+                }
+                
+                ImGui::EndTabItem();
+            }
+            
+            // TX Usage Tab
+            if (ImGui::BeginTabItem("TX Usage"))
+            {
+                ImGui::Text("Transmit (TX) Usage by Interface");
+                ImGui::Spacing();
+                
+                for (const auto& interfaceName : interfaceNames)
+                {
+                    TX txStats = getTXStats(interfaceName);
+                    
+                    // Convert bytes to GB for display (2GB scale)
+                    double txGB = (double)txStats.bytes / (1024.0 * 1024.0 * 1024.0);
+                    float txPercent = (float)(txGB / 2.0); // Scale to 2GB max
+                    if (txPercent > 1.0f) txPercent = 1.0f;
+                    
+                    ImGui::Text("%s", interfaceName.c_str());
+                    ImGui::SameLine();
+                    ImGui::Text("(%.3f GB)", txGB);
+                    ImGui::ProgressBar(txPercent, ImVec2(0.0f, 0.0f), 
+                                      (formatNetworkBytes(txStats.bytes) + " / 2GB").c_str());
+                    ImGui::Spacing();
+                }
+                
+                ImGui::EndTabItem();
+            }
+            
+            ImGui::EndTabBar();
         }
     }
 

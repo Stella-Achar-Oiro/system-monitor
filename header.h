@@ -61,6 +61,8 @@ struct Proc
     long long int rss;
     long long int utime;
     long long int stime;
+    float cpuPercent;
+    float memPercent;
 };
 
 struct IP4
@@ -76,19 +78,7 @@ struct Networks
 
 struct TX
 {
-    int bytes;
-    int packets;
-    int errs;
-    int drop;
-    int fifo;
-    int frame;
-    int compressed;
-    int multicast;
-};
-
-struct RX
-{
-    int bytes;
+    long long bytes;
     int packets;
     int errs;
     int drop;
@@ -98,15 +88,49 @@ struct RX
     int compressed;
 };
 
+struct RX
+{
+    long long bytes;
+    int packets;
+    int errs;
+    int drop;
+    int fifo;
+    int frame;
+    int compressed;
+    int multicast;
+};
+
+// Process state counts
+struct ProcessStateCounts
+{
+    int running;
+    int sleeping;
+    int uninterruptible;
+    int zombie;
+    int traced;
+    int stopped;
+    int total;
+};
+
 // system stats
 string CPUinfo();
 const char *getOsName();
 string getCurrentUser();
 string getHostname();
 int getTotalProcesses();
+ProcessStateCounts getProcessStateCounts();
+// Fan information
+struct FanInfo
+{
+    bool enabled;
+    int speed;
+    int level;
+};
+
 CPUStats readCPUStats();
 float calculateCPUPercent(const CPUStats &current, const CPUStats &previous);
 float readThermalTemp();
+FanInfo readFanInfo();
 
 // memory and processes
 struct MemoryInfo
