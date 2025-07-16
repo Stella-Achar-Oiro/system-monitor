@@ -1,5 +1,6 @@
 # Build artifacts
 *.o
+monitor
 simple_benchmark
 simple_debug
 simple_extractor
