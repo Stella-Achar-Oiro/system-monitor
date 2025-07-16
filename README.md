@@ -15,7 +15,7 @@ A comprehensive real-time system monitoring application built with C++ and Dear 
 - **CPU Tab**: Real-time CPU usage with interactive performance graph
 - **Fan Tab**: Hardware fan monitoring with speed and level indicators
 - **Thermal Tab**: Temperature monitoring with thermal sensor data
-- **Interactive Controls**: All graphs feature pause/resume, FPS adjustment, and Y-scale controls
+- **Interactive Controls**: All graphs feature pause/resume, FPS adjustment (1-120 FPS), and Y-scale controls (50-200 range)
 
 ### Memory & Process Monitor
 - **RAM Usage**: Visual progress bar with detailed memory statistics
@@ -25,17 +25,15 @@ A comprehensive real-time system monitoring application built with C++ and Dear 
   - PID, Name, State
   - CPU Usage Percentage
   - Memory Usage Percentage
-  - Virtual Size, RSS, CPU Time
-  - **Sortable columns** (click headers to sort)
   - **Process filtering** (search by name)
-  - **Multiple selection** support
+  - **Basic selection** support
 
 ### Network Monitor
 - **IPv4 Interfaces**: Display of all network interfaces with IP addresses
 - **RX Statistics**: Receive statistics including bytes, packets, errors, drops, etc.
 - **TX Statistics**: Transmit statistics with collision and carrier error tracking
-- **Visual Usage Display**: Progress bars showing network usage with 0GB-2GB scale
-- **Intelligent Formatting**: Automatic byte conversion (B/KB/MB/GB) following optimal display rules
+- **Visual Usage Display**: Progress bars showing network usage with dynamic scaling
+- **Byte Formatting**: Automatic byte conversion (B/K/M/G) with standard 1024-based scaling
 
 ## Technical Implementation
 
@@ -100,19 +98,18 @@ The project uses a cross-platform Makefile with support for:
 3. **Network Window**: Network interface monitoring and statistics
 
 ### Interactive Features
-- **Graph Controls**: Use sliders to adjust FPS and Y-scale
+- **Graph Controls**: Use sliders to adjust FPS (1-120) and Y-scale (50-200)
 - **Pause/Resume**: Stop graph animations for detailed analysis
-- **Process Filtering**: Type in the filter box to search processes
-- **Column Sorting**: Click table headers to sort by different criteria
-- **Multi-selection**: Select multiple processes for comparison
+- **Process Filtering**: Type in the filter box to search processes by name
+- **Process Selection**: Basic row selection with Ctrl+click support
 
 ## Performance Monitoring
 
 ### Real-time Updates
 - **System Stats**: Updated every frame
-- **Process Table**: Refreshed every 2 seconds
-- **Network Stats**: Refreshed every 2 seconds
-- **Graphs**: 60 FPS default (adjustable)
+- **Process Table**: Updated on window refresh
+- **Network Stats**: Updated on window refresh
+- **Graphs**: 5 FPS default (adjustable 1-120 FPS)
 
 ### Resource Usage
 - **CPU**: Minimal impact, optimized /proc reading
