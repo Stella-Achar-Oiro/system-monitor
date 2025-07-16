@@ -1,181 +1,80 @@
 #include "header.h"
+#include <cstring>
+#include <cstdio>
 
-// read network interface statistics from /proc/net/dev
-vector<NetworkStats> readNetworkStats()
-{
-    vector<NetworkStats> stats;
-    ifstream file("/proc/net/dev");
-    if (file.is_open())
-    {
-        string line;
-        // Skip header lines
-        getline(file, line);
-        getline(file, line);
-        
-        while (getline(file, line))
-        {
-            istringstream iss(line);
-            string interface;
-            iss >> interface;
-            
-            // Remove colon from interface name
-            if (interface.back() == ':')
-                interface.pop_back();
-            
-            NetworkStats netStat;
-            netStat.interface = interface;
-            
-            iss >> netStat.rxBytes >> netStat.rxPackets >> netStat.rxErrs >> netStat.rxDrop
-                >> netStat.rxFifo >> netStat.rxFrame >> netStat.rxCompressed >> netStat.rxMulticast
-                >> netStat.txBytes >> netStat.txPackets >> netStat.txErrs >> netStat.txDrop
-                >> netStat.txFifo >> netStat.txColls >> netStat.txCarrier >> netStat.txCompressed;
-            
-            stats.push_back(netStat);
-        }
-        file.close();
-    }
-    return stats;
-}
-
-// get network interface IPv4 addresses
-Networks getNetworkInterfaces()
+Networks getNetworks()
 {
     Networks networks;
     struct ifaddrs *ifaddr, *ifa;
-    
-    if (getifaddrs(&ifaddr) == -1)
+
+    if (getifaddrs(&ifaddr) == -1) {
         return networks;
-    
-    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next)
-    {
-        if (ifa->ifa_addr == NULL)
-            continue;
-        
-        if (ifa->ifa_addr->sa_family == AF_INET)
-        {
+    }
+
+    for (ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == nullptr) continue;
+
+        if (ifa->ifa_addr->sa_family == AF_INET) {
             IP4 ip4;
             ip4.name = strdup(ifa->ifa_name);
-            
-            struct sockaddr_in *addr = (struct sockaddr_in *)ifa->ifa_addr;
-            inet_ntop(AF_INET, &(addr->sin_addr), ip4.addressBuffer, INET_ADDRSTRLEN);
-            
+            struct sockaddr_in* addr_in = (struct sockaddr_in*)ifa->ifa_addr;
+            inet_ntop(AF_INET, &(addr_in->sin_addr), ip4.addressBuffer, INET_ADDRSTRLEN);
             networks.ip4s.push_back(ip4);
         }
     }
-    
+
     freeifaddrs(ifaddr);
     return networks;
 }
 
-// format network speed to human readable format
-string formatNetworkSpeed(long long bytes)
+NetStats getNetStats()
 {
-    const char* units[] = {"B/s", "KB/s", "MB/s", "GB/s"};
-    int unit = 0;
-    double speed = bytes;
-    
-    while (speed >= 1024 && unit < 3)
-    {
-        speed /= 1024;
-        unit++;
-    }
-    
-    char buffer[64];
-    if (unit == 0)
-        snprintf(buffer, sizeof(buffer), "%.0f %s", speed, units[unit]);
-    else
-        snprintf(buffer, sizeof(buffer), "%.2f %s", speed, units[unit]);
-    
-    return string(buffer);
-}
+    NetStats stats;
+    ifstream file("/proc/net/dev");
+    string line;
 
-// convert bytes to appropriate unit (B, KB, MB, GB)
-string formatNetworkBytes(long long bytes)
-{
-    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-    int unit = 0;
-    double size = bytes;
-    
-    // Auto-adjust to appropriate unit
-    while (size >= 1024 && unit < 4)
-    {
-        size /= 1024;
-        unit++;
-    }
-    
-    char buffer[64];
-    if (unit == 0)
-        snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit]);
-    else if (size < 10)
-        snprintf(buffer, sizeof(buffer), "%.2f %s", size, units[unit]);
-    else if (size < 100)
-        snprintf(buffer, sizeof(buffer), "%.1f %s", size, units[unit]);
-    else
-        snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit]);
-    
-    return string(buffer);
-}
+    getline(file, line);
+    getline(file, line);
 
-// get RX statistics for a specific interface
-RX getRXStats(const string& interface)
-{
-    RX rx = {0};
-    vector<NetworkStats> stats = readNetworkStats();
-    
-    for (const auto& stat : stats)
-    {
-        if (stat.interface == interface)
-        {
-            rx.bytes = stat.rxBytes;
-            rx.packets = stat.rxPackets;
-            rx.errs = stat.rxErrs;
-            rx.drop = stat.rxDrop;
-            rx.fifo = stat.rxFifo;
-            rx.frame = stat.rxFrame;
-            rx.compressed = stat.rxCompressed;
-            rx.multicast = stat.rxMulticast;
-            break;
+    while (getline(file, line)) {
+        size_t colon = line.find(':');
+        if (colon != string::npos) {
+            string iface = line.substr(0, colon);
+            iface.erase(0, iface.find_first_not_of(" \t"));
+
+            string data = line.substr(colon + 1);
+
+            RX rx = {0};
+            TX tx = {0};
+
+            sscanf(data.c_str(), "%lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld %lld",
+                   &rx.bytes, &rx.packets, &rx.errs, &rx.drop, &rx.fifo, &rx.frame, &rx.compressed, &rx.multicast,
+                   &tx.bytes, &tx.packets, &tx.errs, &tx.drop, &tx.fifo, &tx.colls, &tx.carrier, &tx.compressed);
+
+            stats.rx[iface] = rx;
+            stats.tx[iface] = tx;
         }
     }
-    
-    return rx;
+
+    return stats;
 }
 
-// get TX statistics for a specific interface
-TX getTXStats(const string& interface)
+string formatBytes(long long bytes)
 {
-    TX tx = {0};
-    vector<NetworkStats> stats = readNetworkStats();
-    
-    for (const auto& stat : stats)
-    {
-        if (stat.interface == interface)
-        {
-            tx.bytes = stat.txBytes;
-            tx.packets = stat.txPackets;
-            tx.errs = stat.txErrs;
-            tx.drop = stat.txDrop;
-            tx.fifo = stat.txFifo;
-            tx.colls = stat.txColls;
-            tx.carrier = stat.txCarrier;
-            tx.compressed = stat.txCompressed;
-            break;
-        }
-    }
-    
-    return tx;
-}
+    const char* units[] = {"B", "K", "M", "G"};
+    int unit = 0;
+    double size = (double)bytes;
 
-// get list of all network interfaces
-vector<string> getNetworkInterfaceList()
-{
-    vector<string> interfaces;
-    vector<NetworkStats> stats = readNetworkStats();
-    
-    for (const auto& stat : stats)
-    {
-        interfaces.push_back(stat.interface);
+    while (size >= 1024.0 && unit < 3) {
+        size /= 1024.0;
+        unit++;
     }
-    
-    return interfaces;
+
+    char buffer[64];
+    if (unit == 0) {
+        snprintf(buffer, sizeof(buffer), "%.0f%s", size, units[unit]);
+    } else {
+        snprintf(buffer, sizeof(buffer), "%.0f%s", size, units[unit]);
+    }
+    return string(buffer);
 }

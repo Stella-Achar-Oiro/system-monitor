@@ -1,210 +1,110 @@
 #include "header.h"
+#include <cstdlib>
+#include <cctype>
 
-// read memory information from /proc/meminfo
-MemoryInfo readMemoryInfo()
-{
-    MemoryInfo mem = {0};
-    ifstream file("/proc/meminfo");
-    if (file.is_open())
-    {
-        string line;
-        while (getline(file, line))
-        {
-            if (line.find("MemTotal:") == 0)
-                mem.total = stoll(line.substr(9)) * 1024; // Convert KB to bytes
-            else if (line.find("MemFree:") == 0)
-                mem.free = stoll(line.substr(8)) * 1024;
-            else if (line.find("MemAvailable:") == 0)
-                mem.available = stoll(line.substr(13)) * 1024;
-            else if (line.find("Cached:") == 0)
-                mem.cached = stoll(line.substr(7)) * 1024;
-            else if (line.find("Buffers:") == 0)
-                mem.buffers = stoll(line.substr(8)) * 1024;
-            else if (line.find("SwapTotal:") == 0)
-                mem.swapTotal = stoll(line.substr(10)) * 1024;
-            else if (line.find("SwapFree:") == 0)
-                mem.swapFree = stoll(line.substr(9)) * 1024;
-        }
-        file.close();
-    }
-    
-    // Calculate derived values
-    mem.used = mem.total - mem.available;
-    mem.swapUsed = mem.swapTotal - mem.swapFree;
-    mem.memUsedPercent = (float)mem.used / mem.total * 100.0f;
-    if (mem.swapTotal > 0)
-        mem.swapUsedPercent = (float)mem.swapUsed / mem.swapTotal * 100.0f;
-    
-    return mem;
-}
-
-// read process information from /proc/[pid]/stat
-vector<Proc> readProcessList()
+vector<Proc> getProcesses()
 {
     vector<Proc> processes;
-    DIR *procDir = opendir("/proc");
-    if (procDir == NULL)
-        return processes;
+    DIR* proc_dir = opendir("/proc");
+    if (!proc_dir) return processes;
 
-    // Get total system memory for percentage calculations
-    MemoryInfo memInfo = readMemoryInfo();
-    long long totalMemory = memInfo.total;
-    
-    // Get CPU stats for percentage calculations
-    static CPUStats prevCPUStats = readCPUStats();
-    CPUStats currentCPUStats = readCPUStats();
-    static map<int, Proc> prevProcesses;
-    
-    struct dirent *entry;
-    while ((entry = readdir(procDir)) != NULL)
-    {
-        if (isdigit(entry->d_name[0]))
-        {
-            int pid = atoi(entry->d_name);
-            string statPath = "/proc/" + string(entry->d_name) + "/stat";
-            ifstream file(statPath);
-            if (file.is_open())
-            {
-                Proc proc;
-                proc.pid = pid;
-                proc.cpuPercent = 0.0f;
-                proc.memPercent = 0.0f;
-                
+    // Get system uptime for CPU calculation
+    ifstream uptime_file("/proc/uptime");
+    double uptime = 0.0;
+    if (uptime_file.is_open()) {
+        uptime_file >> uptime;
+    }
+
+    // Get system clock ticks per second
+    long clock_ticks = sysconf(_SC_CLK_TCK);
+
+    struct dirent* entry;
+    while ((entry = readdir(proc_dir)) != nullptr) {
+        if (isdigit(entry->d_name[0])) {
+            Proc proc = {0};
+            proc.pid = atoi(entry->d_name);
+
+            string stat_path = "/proc/" + string(entry->d_name) + "/stat";
+            ifstream stat_file(stat_path);
+            if (stat_file.is_open()) {
                 string line;
-                if (getline(file, line))
-                {
-                    istringstream iss(line);
-                    string field;
-                    int fieldIndex = 0;
-                    
-                    while (iss >> field)
-                    {
-                        if (fieldIndex == 1) // Process name
-                        {
-                            proc.name = field;
-                            // Remove parentheses
-                            if (proc.name.front() == '(')
-                                proc.name.erase(0, 1);
-                            if (proc.name.back() == ')')
-                                proc.name.pop_back();
-                        }
-                        else if (fieldIndex == 2) // State
-                            proc.state = field[0];
-                        else if (fieldIndex == 13) // User time
-                            proc.utime = stoll(field);
-                        else if (fieldIndex == 14) // System time
-                            proc.stime = stoll(field);
-                        else if (fieldIndex == 22) // Virtual memory size
-                            proc.vsize = stoll(field);
-                        else if (fieldIndex == 23) // Resident set size
-                            proc.rss = stoll(field);
-                        
-                        fieldIndex++;
-                        if (fieldIndex > 23) break;
+                getline(stat_file, line);
+                if (!line.empty()) {
+                    char name[256];
+                    long long starttime;
+                    sscanf(line.c_str(), "%d %s %c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lld %lld %*d %*d %*d %*d %*d %*d %lld %lld %lld",
+                           &proc.pid, name, &proc.state, &proc.utime, &proc.stime, &starttime, &proc.vsize, &proc.rss);
+                    proc.name = string(name);
+                    if (proc.name.front() == '(' && proc.name.back() == ')') {
+                        proc.name = proc.name.substr(1, proc.name.length() - 2);
                     }
-                }
-                file.close();
-                
-                // Calculate memory percentage
-                if (totalMemory > 0)
-                {
-                    long long procMemory = proc.rss * 4096; // RSS is in pages (4KB each)
-                    proc.memPercent = (float)procMemory / totalMemory * 100.0f;
-                }
-                
-                // Calculate CPU percentage (simplified)
-                if (prevProcesses.find(pid) != prevProcesses.end())
-                {
-                    Proc prevProc = prevProcesses[pid];
-                    long long totalTime = (proc.utime + proc.stime) - (prevProc.utime + prevProc.stime);
-                    long long totalCPUTime = (currentCPUStats.user + currentCPUStats.nice + currentCPUStats.system + currentCPUStats.idle) -
-                                           (prevCPUStats.user + prevCPUStats.nice + prevCPUStats.system + prevCPUStats.idle);
-                    
-                    if (totalCPUTime > 0)
-                    {
-                        proc.cpuPercent = (float)totalTime / totalCPUTime * 100.0f;
+
+                    // Calculate CPU percentage
+                    double total_time = (double)(proc.utime + proc.stime) / clock_ticks;
+                    double seconds = uptime - (double)starttime / clock_ticks;
+                    if (seconds > 0) {
+                        proc.cpu_percent = (float)(100.0 * total_time / seconds);
+                    } else {
+                        proc.cpu_percent = 0.0f;
                     }
+
+                    processes.push_back(proc);
                 }
-                
-                processes.push_back(proc);
-                prevProcesses[pid] = proc;
             }
         }
     }
-    closedir(procDir);
-    
-    prevCPUStats = currentCPUStats;
+    closedir(proc_dir);
     return processes;
 }
 
-// read disk information using statvfs
-vector<DiskInfo> readDiskInfo()
+MemInfo getMemInfo()
 {
-    vector<DiskInfo> disks;
-    
-    // Read mounted filesystems from /proc/mounts
-    ifstream file("/proc/mounts");
-    if (file.is_open())
-    {
-        string line;
-        while (getline(file, line))
-        {
-            istringstream iss(line);
-            string device, mountpoint, fstype;
-            iss >> device >> mountpoint >> fstype;
-            
-            // Skip special filesystems
-            if (device.find("/dev/") == 0 || mountpoint == "/")
-            {
-                struct statvfs stat;
-                if (statvfs(mountpoint.c_str(), &stat) == 0)
-                {
-                    DiskInfo disk;
-                    disk.filesystem = device;
-                    disk.mountpoint = mountpoint;
-                    disk.total = stat.f_blocks * stat.f_frsize;
-                    disk.free = stat.f_bavail * stat.f_frsize;
-                    disk.used = disk.total - disk.free;
-                    disk.usedPercent = (float)disk.used / disk.total * 100.0f;
-                    disks.push_back(disk);
-                }
-            }
+    MemInfo info = {0, 0, 0};
+    ifstream file("/proc/meminfo");
+    string line;
+    long long free = 0;
+    while (getline(file, line)) {
+        if (line.find("MemTotal:") != string::npos) {
+            sscanf(line.c_str(), "MemTotal: %lld kB", &info.total);
+            info.total *= 1024;
+        } else if (line.find("MemFree:") != string::npos) {
+            sscanf(line.c_str(), "MemFree: %lld kB", &free);
+        } else if (line.find("MemAvailable:") != string::npos) {
+            sscanf(line.c_str(), "MemAvailable: %lld kB", &info.available);
+            info.available *= 1024;
         }
-        file.close();
     }
-    
-    return disks;
+    info.used = info.total - (free * 1024);
+    return info;
 }
 
-// format bytes to human readable format
-string formatBytes(long long bytes)
+MemInfo getSwapInfo()
 {
-    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-    int unit = 0;
-    double size = bytes;
-    
-    while (size >= 1024 && unit < 4)
-    {
-        size /= 1024;
-        unit++;
+    MemInfo info = {0, 0, 0};
+    ifstream file("/proc/meminfo");
+    string line;
+    while (getline(file, line)) {
+        if (line.find("SwapTotal:") != string::npos) {
+            sscanf(line.c_str(), "SwapTotal: %lld kB", &info.total);
+            info.total *= 1024;
+        } else if (line.find("SwapFree:") != string::npos) {
+            long long free;
+            sscanf(line.c_str(), "SwapFree: %lld kB", &free);
+            info.available = free * 1024;
+        }
     }
-    
-    char buffer[64];
-    if (unit == 0)
-        snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit]);
-    else
-        snprintf(buffer, sizeof(buffer), "%.1f %s", size, units[unit]);
-    
-    return string(buffer);
+    info.used = info.total - info.available;
+    return info;
 }
 
-// calculate process CPU usage
-float calculateProcessCPU(const Proc& current, const Proc& previous, float deltaTime)
+DiskInfo getDiskInfo()
 {
-    if (deltaTime <= 0) return 0.0f;
-    
-    long long totalTime = (current.utime + current.stime) - (previous.utime + previous.stime);
-    float cpuPercent = (float)totalTime / (deltaTime * sysconf(_SC_CLK_TCK)) * 100.0f;
-    
-    return cpuPercent;
+    DiskInfo info = {0, 0, 0};
+    struct statvfs stat;
+    if (statvfs("/", &stat) == 0) {
+        info.total = stat.f_blocks * stat.f_frsize;
+        info.available = stat.f_bavail * stat.f_frsize;
+        info.used = info.total - (stat.f_bfree * stat.f_frsize);
+    }
+    return info;
 }

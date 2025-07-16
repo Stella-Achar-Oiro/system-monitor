@@ -12,7 +12,6 @@
 #include <cmath>
 // lib to read from file
 #include <fstream>
-#include <sstream>
 // for the name of the computer and the logged in user
 #include <unistd.h>
 #include <limits.h>
@@ -33,7 +32,6 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <map>
-#include <algorithm>
 
 using namespace std;
 
@@ -61,8 +59,7 @@ struct Proc
     long long int rss;
     long long int utime;
     long long int stime;
-    float cpuPercent;
-    float memPercent;
+    float cpu_percent;
 };
 
 struct IP4
@@ -76,108 +73,68 @@ struct Networks
     vector<IP4> ip4s;
 };
 
-struct TX
-{
-    long long bytes;
-    int packets;
-    int errs;
-    int drop;
-    int fifo;
-    int colls;
-    int carrier;
-    int compressed;
-};
-
 struct RX
 {
     long long bytes;
-    int packets;
-    int errs;
-    int drop;
-    int fifo;
-    int frame;
-    int compressed;
-    int multicast;
+    long long packets;
+    long long errs;
+    long long drop;
+    long long fifo;
+    long long frame;
+    long long compressed;
+    long long multicast;
 };
 
-// Process state counts
-struct ProcessStateCounts
+struct TX
 {
-    int running;
-    int sleeping;
-    int uninterruptible;
-    int zombie;
-    int traced;
-    int stopped;
-    int total;
+    long long bytes;
+    long long packets;
+    long long errs;
+    long long drop;
+    long long fifo;
+    long long colls;
+    long long carrier;
+    long long compressed;
 };
 
-// system stats
+// System stats
 string CPUinfo();
 const char *getOsName();
-string getCurrentUser();
+string getUsername();
 string getHostname();
-int getTotalProcesses();
-ProcessStateCounts getProcessStateCounts();
-// Fan information
-struct FanInfo
-{
+struct TaskCounts {
+    int total, running, sleeping, stopped, zombie;
+};
+TaskCounts getTaskCounts();
+CPUStats getCPUStats();
+float calculateCPUUsage();
+float getThermalTemp();
+struct FanInfo {
     bool enabled;
     int speed;
     int level;
 };
+FanInfo getFanInfo();
 
-CPUStats readCPUStats();
-float calculateCPUPercent(const CPUStats &current, const CPUStats &previous);
-float readThermalTemp();
-FanInfo readFanInfo();
-
-// memory and processes
-struct MemoryInfo
-{
-    long long total;
-    long long free;
-    long long available;
-    long long used;
-    long long cached;
-    long long buffers;
-    long long swapTotal;
-    long long swapFree;
-    long long swapUsed;
-    float memUsedPercent;
-    float swapUsedPercent;
+// Memory and processes
+vector<Proc> getProcesses();
+struct MemInfo {
+    long long total, available, used;
 };
-
-struct DiskInfo
-{
-    string filesystem;
-    string mountpoint;
-    long long total;
-    long long used;
-    long long free;
-    float usedPercent;
+MemInfo getMemInfo();
+MemInfo getSwapInfo();
+struct DiskInfo {
+    long long total, used, available;
 };
+DiskInfo getDiskInfo();
 
-MemoryInfo readMemoryInfo();
-vector<Proc> readProcessList();
-vector<DiskInfo> readDiskInfo();
+// Network
+Networks getNetworks();
+struct NetStats {
+    map<string, RX> rx;
+    map<string, TX> tx;
+};
+NetStats getNetStats();
 string formatBytes(long long bytes);
-float calculateProcessCPU(const Proc& current, const Proc& previous, float deltaTime);
-
-// network
-struct NetworkStats
-{
-    string interface;
-    long long rxBytes, rxPackets, rxErrs, rxDrop, rxFifo, rxFrame, rxCompressed, rxMulticast;
-    long long txBytes, txPackets, txErrs, txDrop, txFifo, txColls, txCarrier, txCompressed;
-};
-
-vector<NetworkStats> readNetworkStats();
-Networks getNetworkInterfaces();
-string formatNetworkSpeed(long long bytes);
-string formatNetworkBytes(long long bytes);
-RX getRXStats(const string& interface);
-TX getTXStats(const string& interface);
-vector<string> getNetworkInterfaceList();
 
 #endif
