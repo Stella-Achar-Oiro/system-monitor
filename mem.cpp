@@ -74,7 +74,7 @@ MemInfo getMemInfo()
             info.available *= 1024;
         }
     }
-    info.used = info.total - (free * 1024);
+    info.used = info.total - info.available;
     return info;
 }
 

@@ -90,7 +90,7 @@ TaskCounts getTaskCounts()
                         counts.total++;
                         switch (state) {
                             case 'R': counts.running++; break;
-                            case 'S': case 'D': counts.sleeping++; break;
+                            case 'S': case 'D': case 'I': counts.sleeping++; break;
                             case 'T': case 't': counts.stopped++; break;
                             case 'Z': counts.zombie++; break;
                         }
